@@ -5,16 +5,22 @@ Scripts and extensions to help with hackerpolice stuff :\)
 Demo dumpers are made by Nocrex and can be found [here](https://github.com/Nocrex/demo-dumper).
 
 ## [Demo Inputs](https://github.com/Teltta/hackerpolice-stuff/tree/main/demoinputs "/demoinputs")
-Scan demos in the current directory for triggerbot instances.
+Scan demos in the current directory for triggerbot instances.<br>
 As of 20/04/2026 some cheats have fixed the "bug" that caused double attack commands.
 
 ## [Demo Search](https://github.com/Teltta/hackerpolice-stuff/tree/main/demosearch "/demosearch")
 Search for users in past demos.
 
 ## [Parse Kills](https://github.com/Teltta/hackerpolice-stuff/tree/main/parsekills "/parsekills")
-Parse kill counts and deaths from killfeed.
+Parse kill counts and deaths from killfeed.<br>
 Use [demo-viewer](https://github.com/Nocrex/tf2-demo-player) to export the kills to a file and inputs that file into the parser.
 
 ## [Steam Buttons](https://github.com/Teltta/hackerpolice-stuff/tree/main/steambuttons "/steambuttons")
-A Firefox and Tampermonkey extension/script that adds Steamhistory and Shadefall buttons,
+A Firefox and Tampermonkey extension/script that adds Steamhistory and Shadefall buttons,<br>
 cheater markings, past usernames, and user id/url copy button to Steam profiles.
+
+## [Mark Group](https://github.com/Teltta/hackerpolice-stuff/tree/main/markgroup "/markgroup")
+Allows you to mark steam groups as suspicious for [TFBD](https://github.com/surepy/tf2_bot_detector).
+
+## [Remove Demos](https://github.com/Teltta/hackerpolice-stuff/tree/main/removedemos "/removedemos")
+Tool to remove old demos according to user selected criteria. Make a shortcut and put it into __`shell:starup`__ to run it on each boot.
