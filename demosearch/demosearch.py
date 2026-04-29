@@ -1,18 +1,44 @@
-import os, string, re, json, sys, msvcrt, shutil, subprocess, time
+import os, string, re, json, sys, msvcrt, shutil, subprocess, time, ctypes
 from colorama import init, Fore
 from typing import Any, Callable, Generator, Iterable
 init(True)
 
 configPath = "\\demosearch.cfg"
+dumpFilePath = "\\demosearchDump.json"
 forceUpdate = False
 dumperName = "demo-dumper.exe"
 
 defaultCfg = {
+    "_explanations": [
+        "Inputs:",
+        "   '--f' Will forcefully parse the demos even if there arent any new ones.",
+        "   '--help' This help message. :)",
+        "",
+        "demoPath list[str]: Path to the demo folder relative to tf2 root folder.",
+        "",
+        "gamePaths list[str]: Path to tf2 root folder relative to the drive root. All drives will be checked.",
+        "",
+        "pathBlacklist list[str]: List of paths to be ignored. Path should include the demo folder,",
+        "e.g; C:\\SteamLibrary\\...\\Team Fortress 2\\tf\\demos",
+        "",
+        "pauseButton list[int]=[18, 80]: A list of key codes that all have to be pressed simultaneuosly.",
+        "Key codes can be found here; https://asawicki.info/nosense/doc/devices/keyboard/key_codes.html. Default is Alt+P.",
+        "",
+        "dumpToFile bool=true: Wether to dump results to a file.",
+        "",
+        "limitAmount int=1000: Max amount of demos to search before stopping.",
+        "",
+        "oldestFirst bool=false: Wether to start from oldest files first. Setting to false will search newest demos first."
+    ],
     "demoPath": "\\tf\\demos",
     "gamePaths": ["\\Program Files (x86)\\Steam\\steamapps\\common\\Team Fortress 2",
                   "\\SteamLibrary\\Team Fortress 2",
                   "\\SteamLibrary\\steamapps\\common\\Team Fortress 2"],
     "pathBlacklist": [],
+    "pauseButton": [
+        18, 80
+    ],
+    "dumpToFile": True,
     "limitAmount": 1000,
     "oldestFirst": False,
     "_lastModify": {}
@@ -22,10 +48,11 @@ cwd = os.getcwd()
 configFullpath = f"{cwd.strip("\\")}\\{configPath.strip("\\")}"
 if not os.path.isfile(configFullpath):
     with open(configFullpath, "wt") as file:
-        file.write(json.dumps(defaultCfg, indent=4))
+        if file.writable():
+            file.write(json.dumps(defaultCfg, indent=4))
 
-    print(f"Created config at {configFullpath}.\nYou can change the values to your liking or keep them as default, and then re-run the program.\n\nPress enter to exit...")
-    input()
+            print(f"Created config at {configFullpath}.\nYou can change the values to your liking or keep them as default, and then re-run the program.\n\nPress enter to exit...")
+            input()
     sys.exit()
 
 with open(configFullpath, "rt") as file_:
@@ -60,6 +87,8 @@ class List(list):
 
 missing = 0
 for key in defaultCfg.keys():
+    if key.startswith("_"):
+        continue
     if config.get(key) is None:
         print(f"{Fore.YELLOW}Missing {key} from config, using \"{defaultCfg[key]}\"")
         missing += 1
@@ -73,6 +102,13 @@ def get_drive_letters():
         if os.path.exists(f"{d}:\\")
     ]
 
+
+def wait_for_input(valid_keys: Iterable):
+    while True:
+        c = ord(Pause())
+        if c in valid_keys: # 27 esc, 32 space
+            return c
+
 def cls():
     mapping = {"win32":"cls", "linux":"clear", "darwin":"clear", "cygwin":"cls"}
     os.system(mapping.get(sys.platform, "clear"))
@@ -80,6 +116,12 @@ def cls():
 def Pause(text:str=None) -> str:
     if text: print(text)
     return msvcrt.getwch()
+
+VK_SPACE = 0x20
+VK_PAUSE = 0x22
+
+def buttonHeld(button: int):
+    return bool(ctypes.windll.user32.GetAsyncKeyState(button) & 0x8000)
 
 def parseInput(_in:str) -> list[str]:
     isContinuation = False; d = []; toJoin = []
@@ -126,17 +168,20 @@ def steamId64To32(id: int):
 
 def find_name_in_demos(targets_:list[str]):
     targets = [t.lower() for t in targets_]
-    matches = 0
+    matches: dict[str, list[str]] = {}
+    matchCount = 0
     needsUpdate = False
 
     with open(configFullpath, "rt") as file_:
         config:dict[str, str] = json.loads((file_.read())) or defaultCfg
 
-    demoPath = config.get("demoPath", defaultCfg["demoPath"])
-    gamePaths = config.get("gamePaths", defaultCfg["gamePaths"])
-    pathBlacklist = config.get("pathBlacklist", defaultCfg["pathBlacklist"])
-    limitAmount = config.get("limitAmount", defaultCfg["limitAmount"])
-    oldestFirst = config.get("oldestFirst", defaultCfg["oldestFirst"])
+    demoPath: str = config.get("demoPath", defaultCfg["demoPath"])
+    gamePaths: list[str] = config.get("gamePaths", defaultCfg["gamePaths"])
+    pathBlacklist: list[str] = config.get("pathBlacklist", defaultCfg["pathBlacklist"])
+    limitAmount: int = config.get("limitAmount", defaultCfg["limitAmount"])
+    oldestFirst: bool = config.get("oldestFirst", defaultCfg["oldestFirst"])
+    pauseButton: list[int] = config.get("pauseButton", defaultCfg["pauseButton"])
+    dumpToFile: bool = config.get("dumpToFile", defaultCfg["dumpToFile"])
 
     for drive in get_drive_letters():
         for path in gamePaths:
@@ -196,6 +241,11 @@ def find_name_in_demos(targets_:list[str]):
                                 if limitAmount > 0 and amount > limitAmount:
                                     break
 
+                                if all(buttonHeld(b) for b in pauseButton):
+                                    print("Script paused. Press [Enter] to continue...", end="\r")
+                                    wait_for_input((13,))
+                                    print(" "*50)
+
                                 filePath = os.path.join(fullPath, file)
 
                                 amount += 1
@@ -210,7 +260,12 @@ def find_name_in_demos(targets_:list[str]):
                                 ]
 
                                 if matchesFound:
-                                    matches += 1
+                                    matchExists = matches.get(fullPath)
+                                    if matchExists is None:
+                                        matches[fullPath] = []
+
+                                    matches[fullPath].append(f"[MATCH] {filePath} | "+ ", ".join(f"{val}" for val in matchesFound))
+                                    matchCount += 1
                                     matchAmount += 1
                                     print(f"{Fore.GREEN}[MATCH] {Fore.RESET}{filePath} | "+ ", ".join(f"{Fore.BLUE}{val}{Fore.RESET}" for val in matchesFound))
 
@@ -230,13 +285,14 @@ def find_name_in_demos(targets_:list[str]):
             if file_.writable():
                 file_.write(json.dumps(config, indent=4))
 
-    return matches
+    if dumpToFile:
+        with open(dumpFilePath.strip("\\"), "wt", encoding="utf-8") as file2_:
+            if file2_.writable():
+                file2_.write(json.dumps(matches, indent=4, ensure_ascii=False))
+                print("")
+                print(f"{Fore.YELLOW}Dumped results to file.")
 
-def wait_for_input(valid_keys: Iterable):
-    while True:
-        c = ord(Pause())
-        if c in valid_keys: # 27 esc, 32 space
-            return c
+    return matchCount
 
 if __name__ == "__main__":
     while True:
@@ -249,26 +305,27 @@ if __name__ == "__main__":
                 targets[i] = str(steamId64To32(int(target)))
 
         if targets.find(key=lambda x: x == "--help"):
-            print()
-
-        if targets.find(key=lambda x: x == "--f"):
-            forceUpdate = True
-            targets = list(filter(lambda x: x != "--f", targets))
-
-        if not targets:
-            print("Input something you goober.")
-
+            print("")
+            print("\n".join(defaultCfg["_explanations"]))
         else:
-            print("")
-            print(f"{', '.join(targets)}")
+            if targets.find(key=lambda x: x == "--f"):
+                forceUpdate = True
+                targets = list(filter(lambda x: x != "--f", targets))
 
-            results = find_name_in_demos(targets)
-            
-            print("")
-            if not results:
-                print("No matches found.")
+            if not targets:
+                print("Input something you goober.")
+
             else:
-                print(f"{Fore.RED}{results}{Fore.RESET} match{'' if results == 1 else 'es'} found.")
+                print("")
+                print(f"{', '.join(targets)}")
+
+                resultCount = find_name_in_demos(targets)
+                
+                print("")
+                if resultCount < 1:
+                    print("No matches found.")
+                else:
+                    print(f"{Fore.RED}{resultCount}{Fore.RESET} match{'' if resultCount == 1 else 'es'} found.")
 
         print("")
         print("Press [ESC] to exit.\nPress [Space] to continue...")
