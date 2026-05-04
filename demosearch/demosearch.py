@@ -1,6 +1,6 @@
 import os, string, re, json, sys, msvcrt, shutil, subprocess, time, ctypes
 from colorama import init, Fore
-from typing import Any, Callable, Generator, Iterable
+from typing import Any, Callable, Iterable
 init(True)
 
 configPath = "\\demosearch.cfg"
@@ -59,18 +59,6 @@ with open(configFullpath, "rt") as file_:
     config:dict[str, str] = json.loads((file_.read())) or defaultCfg
 
 class List(list):
-    def find_all(self, /, *, key: Callable|type) -> Generator[Any]:
-        if isinstance(key, (type)):
-            for item in self:
-                if isinstance(item, key):
-                    yield item
-        else:
-            for item in self:
-                try:
-                    if key(item):
-                        yield item
-                except:continue
-    
     def find(self, /, *, key: Callable|type) -> Any:
         if isinstance(key, (type)):
             for item in self:
@@ -116,9 +104,6 @@ def cls():
 def Pause(text:str=None) -> str:
     if text: print(text)
     return msvcrt.getwch()
-
-VK_SPACE = 0x20
-VK_PAUSE = 0x22
 
 def buttonHeld(button: int):
     return bool(ctypes.windll.user32.GetAsyncKeyState(button) & 0x8000)
@@ -166,6 +151,9 @@ def steamId64To32(id: int):
     return f"[U:1:{id-steamID64Offset}]"
     # return id-steamID64Offset
 
+class BreakOut(Exception):
+    pass
+
 def find_name_in_demos(targets_:list[str]):
     targets = [t.lower() for t in targets_]
     matches: dict[str, list[str]] = {}
@@ -183,102 +171,109 @@ def find_name_in_demos(targets_:list[str]):
     pauseButton: list[int] = config.get("pauseButton", defaultCfg["pauseButton"])
     dumpToFile: bool = config.get("dumpToFile", defaultCfg["dumpToFile"])
 
-    for drive in get_drive_letters():
-        for path in gamePaths:
-            gamePath = f"{drive}\\{re.sub(r'^[A-Za-z]:', '', path.strip('\\'))}"
+    try:
+        for drive in get_drive_letters():
+            for path in gamePaths:
+                gamePath = f"{drive}\\{re.sub(r'^[A-Za-z]:', '', path.strip('\\'))}"
 
-            if os.path.exists(gamePath):
-                fullPath = f"{gamePath}\\{demoPath.strip('\\')}"
-                if fullPath in pathBlacklist:
-                    continue
+                if os.path.exists(gamePath):
+                    fullPath = f"{gamePath}\\{demoPath.strip('\\')}"
+                    if fullPath in pathBlacklist:
+                        continue
 
-                if not os.path.exists(fullPath):
-                    continue
-                print("")
-                print(f"Path: {fullPath}")
-                dumpFile = os.path.join(fullPath, "demo_dump.json")
-
-                dirFiles = sorted([os.path.getmtime(os.path.join(fullPath, t)) for t in os.listdir(fullPath) if t.endswith(".dem")], reverse=True)
-                demAmount = len(dirFiles)
-                matchAmount = 0
-                newestFile = int(dirFiles[0])
-
-                _lastModifyCurrentDir: dict[str, int] = config.get("_lastModify", {}).get(fullPath, 0)
-
-                targetExe = os.path.join(fullPath, dumperName)
-                if newestFile > _lastModifyCurrentDir or not os.path.isfile(dumpFile) or forceUpdate:
+                    if not os.path.exists(fullPath):
+                        continue
                     print("")
-                    print("Parsing demos...", end="\r")
-                    bundledExe = get_bundled_exe()
-                    
-                    shutil.copy2(bundledExe, targetExe)
-                    subprocess.run(targetExe, cwd=fullPath, stdout=subprocess.DEVNULL)
+                    print(f"Path: {fullPath}")
+                    dumpFile = os.path.join(fullPath, "demo_dump.json")
 
-                    config["_lastModify"][fullPath] = newestFile
-                    needsUpdate = True
-                    print("Parsing demos... Done")
+                    dirFiles = sorted([os.path.getmtime(os.path.join(fullPath, t)) for t in os.listdir(fullPath) if t.endswith(".dem")], reverse=True)
+                    demAmount = len(dirFiles)
+                    matchAmount = 0
+                    newestFile = int(dirFiles[0])
 
-                with open(dumpFile, encoding="utf-8") as dump:
-                    dumpBytes = dump.read()
-                    dumpData: dict[str, dict[str, str]] = json.loads(dumpBytes)
-                    amount = 0
-                    dump.close()
+                    _lastModifyCurrentDir: dict[str, int] = config.get("_lastModify", {}).get(fullPath, 0)
 
-                    print("")
-                    print("Analyzing demos...")
-                    print("")
-                    for root, _, files in os.walk(fullPath):
-                        files.sort(key=lambda f: os.path.getmtime(os.path.join(root, f)))
-
-                        fileAmount = sum(1 for x in os.listdir(fullPath) if os.path.isfile(os.path.join(root, x)) and x.endswith(".dem"))
-                        filesRead = 0
-
-                        if not oldestFirst:
-                            files.reverse()
-
-                        for file in files:
-                            if file.endswith(".dem"):
-                                if limitAmount > 0 and amount > limitAmount:
-                                    break
-
-                                if all(buttonHeld(b) for b in pauseButton):
-                                    print("Script paused. Press [Enter] to continue...", end="\r")
-                                    wait_for_input((13,))
-                                    print(" "*50)
-
-                                filePath = os.path.join(fullPath, file)
-
-                                amount += 1
-                                filesRead += 1
-                                os.system(f"title {progress_bar(length=60, progress=filesRead/fileAmount)}")
-
-                                temp = dumpData.get(file, {})
-                                data = list(map(lambda x: str(x).lower(), list(temp.keys()) + list(temp.values())))
-                                matchesFound = [
-                                    target for target in targets
-                                    if any(target in item for item in data)
-                                ]
-
-                                if matchesFound:
-                                    matchExists = matches.get(fullPath)
-                                    if matchExists is None:
-                                        matches[fullPath] = []
-
-                                    matches[fullPath].append(f"[MATCH] {filePath} | "+ ", ".join(f"{val}" for val in matchesFound))
-                                    matchCount += 1
-                                    matchAmount += 1
-                                    print(f"{Fore.GREEN}[MATCH] {Fore.RESET}{filePath} | "+ ", ".join(f"{Fore.BLUE}{val}{Fore.RESET}" for val in matchesFound))
-
-                if matchAmount > 0:
-                    print("")
-                print(f"{Fore.GREEN}{matchAmount/demAmount*100:.2f}{Fore.RESET}% matches ({Fore.GREEN}{matchAmount}{Fore.RESET})")
-
-                time.sleep(.5)
-                if os.path.exists(targetExe):
-                    try: os.remove(targetExe)
-                    except PermissionError:
+                    targetExe = os.path.join(fullPath, dumperName)
+                    if newestFile > _lastModifyCurrentDir or not os.path.isfile(dumpFile) or forceUpdate:
                         print("")
-                        print("Could not delete exe (still in use?)")
+                        print("Parsing demos...", end="\r")
+                        bundledExe = get_bundled_exe()
+                        
+                        shutil.copy2(bundledExe, targetExe)
+                        subprocess.run(targetExe, cwd=fullPath, stdout=subprocess.DEVNULL)
+
+                        config["_lastModify"][fullPath] = newestFile
+                        needsUpdate = True
+                        print("Parsing demos... Done")
+
+                    with open(dumpFile, encoding="utf-8") as dump:
+                        dumpBytes = dump.read()
+                        dumpData: dict[str, dict[str, str]] = json.loads(dumpBytes)
+                        amount = 0
+                        dump.close()
+
+                        print("")
+                        print("Analyzing demos...")
+                        print("")
+                        for root, _, files in os.walk(fullPath):
+                            files.sort(key=lambda f: os.path.getmtime(os.path.join(root, f)))
+
+                            fileAmount = sum(1 for x in os.listdir(fullPath) if os.path.isfile(os.path.join(root, x)) and x.endswith(".dem"))
+                            filesRead = 0
+
+                            if not oldestFirst:
+                                files.reverse()
+
+                            for file in files:
+                                if file.endswith(".dem"):
+                                    if limitAmount > 0 and amount > limitAmount:
+                                        break
+
+                                    if all(buttonHeld(b) for b in pauseButton):
+                                        print("Script paused. Press [ESC] to cancel search, or [Enter] to continue.", end="\r")
+                                        o = wait_for_input((13,27))
+                                        if o == 27:
+                                            raise BreakOut
+                                        print(" "*80)
+
+                                    filePath = os.path.join(fullPath, file)
+
+                                    amount += 1
+                                    filesRead += 1
+                                    os.system(f"title {progress_bar(length=60, progress=filesRead/fileAmount)}")
+
+                                    temp = dumpData.get(file, {})
+                                    data = list(map(lambda x: str(x).lower(), list(temp.keys()) + list(temp.values())))
+                                    matchesFound = [
+                                        target for target in targets
+                                        if any(target in item for item in data)
+                                    ]
+
+                                    if matchesFound:
+                                        matchExists = matches.get(fullPath)
+                                        if matchExists is None:
+                                            matches[fullPath] = []
+
+                                        matches[fullPath].append(f"[MATCH] {filePath} | "+ ", ".join(f"{val}" for val in matchesFound))
+                                        matchCount += 1
+                                        matchAmount += 1
+                                        print(f"{Fore.GREEN}[MATCH] {Fore.RESET}{filePath} | "+ ", ".join(f"{Fore.BLUE}{val}{Fore.RESET}" for val in matchesFound))
+
+                    if matchAmount > 0:
+                        print("")
+                    print(f"{Fore.GREEN}{matchAmount/demAmount*100:.2f}{Fore.RESET}% matches ({Fore.GREEN}{matchAmount}{Fore.RESET})")
+
+                    time.sleep(.5)
+                    if os.path.exists(targetExe):
+                        try: os.remove(targetExe)
+                        except PermissionError:
+                            print("")
+                            print("Could not delete exe (still in use?)")
+    except BreakOut:
+        pass
+    except:
+        raise
 
     if needsUpdate:
         with open(configFullpath, "wt") as file_:
