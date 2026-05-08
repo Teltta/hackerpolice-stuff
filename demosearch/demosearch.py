@@ -26,6 +26,11 @@ defaultCfg = {
         "",
         "dumpToFile bool=true: Wether to dump results to a file.",
         "",
+        "dumpPartied bool=true: Dump people who are potentially in a party with the searched user. Party dumping is only available for users searched via ID64/32.",
+        "partyRatio int=30: If someone is together with someone more than x% of games, theyll be counted as 'being in a group'.",
+        "partyRatioMinCount int=3: The minimum amount of games 2 people will need to be in games for them to be counted.",
+        "yourSteamID str/ID32: Used for checking the poeople in games with searched people. Not putting your ID here will result in you showing.",
+        "",
         "limitAmount int=1000: Max amount of demos to search before stopping.",
         "",
         "oldestFirst bool=false: Wether to start from oldest files first. Setting to false will search newest demos first."
@@ -39,6 +44,10 @@ defaultCfg = {
         18, 80
     ],
     "dumpToFile": True,
+    "dumpPartied": True,
+    "partyRatio": 20,
+    "partyRatioMinCount": 3,
+    "yourSteamID": "YourID32Here",
     "limitAmount": 1000,
     "oldestFirst": False,
     "_lastModify": {}
@@ -117,7 +126,9 @@ def parseInput(_in:str) -> list[str]:
             else: toJoin.append(split)
             if endsWith: isContinuation = False; d.append(" ".join(toJoin)); toJoin.clear()
         else:
-            if split.startswith("\""):isContinuation = True; toJoin.append(split[1:])
+            if split.startswith("\""):
+                if split.endswith("\""):d.append(split[1:-1])
+                else: isContinuation = True; toJoin.append(split[1:])
             else: d.append(split)
     if toJoin: d.append(" ".join(toJoin))
     return d
@@ -147,16 +158,25 @@ def flatten_iterable(iterable:list | tuple) -> list:
     return output
 
 steamID64Offset = 76561197960265728
+id32Regex = re.compile(r"\[[uU]:1:[0-9]{3,}\]")
+id64Regex = re.compile(r"7656[0-9]{13}")
 def steamId64To32(id: int):
     return f"[U:1:{id-steamID64Offset}]"
     # return id-steamID64Offset
+
+def steamId32To64(id: str):
+    return int(id.rsplit(":",1)[1].strip("[]"))+steamID64Offset
+
+def getHyperlink(text:str, url:str):
+    return f"\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"
 
 class BreakOut(Exception):
     pass
 
 def find_name_in_demos(targets_:list[str]):
     targets = [t.lower() for t in targets_]
-    matches: dict[str, list[str]] = {}
+    matches: dict[str, dict[str, dict[str, list[str]]]] = {}
+    queued: dict[str, dict[str, int]] = {}
     matchCount = 0
     needsUpdate = False
 
@@ -169,7 +189,12 @@ def find_name_in_demos(targets_:list[str]):
     limitAmount: int = config.get("limitAmount", defaultCfg["limitAmount"])
     oldestFirst: bool = config.get("oldestFirst", defaultCfg["oldestFirst"])
     pauseButton: list[int] = config.get("pauseButton", defaultCfg["pauseButton"])
+
     dumpToFile: bool = config.get("dumpToFile", defaultCfg["dumpToFile"])
+    dumpPartied: bool = config.get("dumpPartied", defaultCfg["dumpPartied"])
+    yourSteamID: str = config.get("yourSteamID", defaultCfg["yourSteamID"]).lower()
+    partyRatio: int = config.get("partyRatio", defaultCfg["partyRatio"])
+    partyRatioMinCount: int = config.get("partyRatioMinCount", defaultCfg["partyRatioMinCount"])
 
     try:
         for drive in get_drive_letters():
@@ -208,57 +233,79 @@ def find_name_in_demos(targets_:list[str]):
                         print("Parsing demos... Done")
 
                     with open(dumpFile, encoding="utf-8") as dump:
-                        dumpBytes = dump.read()
-                        dumpData: dict[str, dict[str, str]] = json.loads(dumpBytes)
-                        amount = 0
+                        dumpData: dict[str, dict[str, str]] = json.loads(dump.read())
                         dump.close()
 
-                        print("")
-                        print("Analyzing demos...")
-                        print("")
-                        for root, _, files in os.walk(fullPath):
-                            files.sort(key=lambda f: os.path.getmtime(os.path.join(root, f)))
+                    amount = 0
 
-                            fileAmount = sum(1 for x in os.listdir(fullPath) if os.path.isfile(os.path.join(root, x)) and x.endswith(".dem"))
-                            filesRead = 0
+                    print("")
+                    print("Analyzing demos...")
+                    print("")
+                    for root, _, files in os.walk(fullPath):
+                        files.sort(key=lambda f: os.path.getmtime(os.path.join(root, f)))
 
-                            if not oldestFirst:
-                                files.reverse()
+                        fileAmount = sum(1 for x in os.listdir(fullPath) if os.path.isfile(os.path.join(root, x)) and x.endswith(".dem"))
+                        filesRead = 0
 
-                            for file in files:
-                                if file.endswith(".dem"):
-                                    if limitAmount > 0 and amount > limitAmount:
-                                        break
+                        if not oldestFirst:
+                            files.reverse()
 
-                                    if all(buttonHeld(b) for b in pauseButton):
-                                        print("Script paused. Press [ESC] to cancel search, or [Enter] to continue.", end="\r")
-                                        o = wait_for_input((13,27))
-                                        if o == 27:
-                                            raise BreakOut
-                                        print(" "*80)
+                        for file in files:
+                            if file.endswith(".dem"):
+                                if limitAmount > 0 and amount > limitAmount:
+                                    break
 
-                                    filePath = os.path.join(fullPath, file)
+                                if all(buttonHeld(b) for b in pauseButton):
+                                    print("Script paused. Press [ESC] to cancel search, or [Enter] to continue.", end="\r")
+                                    o = wait_for_input((13,27))
+                                    if o == 27:
+                                        raise BreakOut
+                                    print(" "*80)
 
-                                    amount += 1
-                                    filesRead += 1
-                                    os.system(f"title {progress_bar(length=60, progress=filesRead/fileAmount)}")
+                                filePath = os.path.join(fullPath, file)
 
-                                    temp = dumpData.get(file, {})
-                                    data = list(map(lambda x: str(x).lower(), list(temp.keys()) + list(temp.values())))
-                                    matchesFound = [
-                                        target for target in targets
-                                        if any(target in item for item in data)
-                                    ]
+                                amount += 1
+                                filesRead += 1
+                                os.system(f"title {progress_bar(length=60, progress=filesRead/fileAmount)}")
 
-                                    if matchesFound:
-                                        matchExists = matches.get(fullPath)
-                                        if matchExists is None:
-                                            matches[fullPath] = []
+                                temp = dumpData.get(file, {})
+                                matchesFound = [
+                                    x for x in map(lambda item: [x.lower() for x in item], temp.items())
+                                    if any( target in item for target in targets for item in x)
+                                ]
 
-                                        matches[fullPath].append(f"[MATCH] {filePath} | "+ ", ".join(f"{val}" for val in matchesFound))
-                                        matchCount += 1
-                                        matchAmount += 1
-                                        print(f"{Fore.GREEN}[MATCH] {Fore.RESET}{filePath} | "+ ", ".join(f"{Fore.BLUE}{val}{Fore.RESET}" for val in matchesFound))
+                                if matchesFound:
+                                    matches.setdefault(fullPath, {})
+
+                                    if dumpPartied:
+
+                                        for uName, uId in matchesFound:
+                                            queued.setdefault(uId, {})
+                                                
+                                            for u2 in temp.values():
+                                                u2 = u2.lower()
+
+                                                if u2 in [uId, yourSteamID]:
+                                                    continue
+
+                                                queued[uId].setdefault(u2, 0)
+
+                                                queued[uId][u2] += 1
+
+                                    for uName, uId in matchesFound:
+                                        matches[fullPath].setdefault(uId, {})
+
+                                        matches[fullPath][uId].setdefault("matches", [])
+                                        matches[fullPath][uId].setdefault("names", [])
+                                        
+                                        matches[fullPath][uId]["matches"].append([filePath, uName])
+                                        names = matches[fullPath][uId]["names"]
+                                        if not uName in names:
+                                            names.append(uName)
+
+                                    matchCount += 1
+                                    matchAmount += 1
+                                    print(f"{Fore.GREEN}[MATCH] {Fore.RESET}{getHyperlink(filePath, f"file:///{fullPath}")} | "+ ", ".join(getHyperlink(f'{Fore.BLUE}{val[1 if (val[1] in targets) else 0]}{Fore.RESET}', f'https://steamhistory.net/id/{steamId32To64(val[1])}') for val in matchesFound))
 
                     if matchAmount > 0:
                         print("")
@@ -280,6 +327,33 @@ def find_name_in_demos(targets_:list[str]):
             if file_.writable():
                 file_.write(json.dumps(config, indent=4))
 
+    if dumpPartied:
+        queCopy = queued.copy()
+
+        for key, value in queued.items(): # searched, dict -> match players
+            inDemoCount = sum([ len(c)
+                               for val in matches.values()
+                                for x, y in val.items()
+                                for z, c in y.items()
+                                if key == x and z == "matches" ])
+
+            valCopy = value.copy()
+
+            for k, v in value.items():
+                ratio = v / inDemoCount * 100
+
+                if v < partyRatioMinCount or ratio < partyRatio:
+                    valCopy.pop(k)
+                else:
+                    valCopy[k] = f"{v} | {ratio:.2f}%"
+
+            if not valCopy:
+                queCopy.pop(key, None)
+            else:
+                queCopy[key] = valCopy
+
+        matches["potentiallyPartied"] = queCopy
+
     if dumpToFile:
         with open(dumpFilePath.strip("\\"), "wt", encoding="utf-8") as file2_:
             if file2_.writable():
@@ -296,7 +370,7 @@ if __name__ == "__main__":
         targets = List(parseInput(in_))
 
         for i, target in enumerate(targets):
-            if re.fullmatch(r"7656[0-9]{13}", target):
+            if id64Regex.fullmatch(target):
                 targets[i] = str(steamId64To32(int(target)))
 
         if targets.find(key=lambda x: x == "--help"):
