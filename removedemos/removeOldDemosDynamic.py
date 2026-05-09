@@ -107,19 +107,31 @@ for drive in get_drive_letters():
                 print("Path: ", fullPath)
                 print("")
 
-                toDelete = []
+                toDelete: list[str] = []
+                toDeleteEventFiles: list[str] = []
                 files = sorted(list(os.listdir(fullPath)), key=lambda x: os.path.getmtime(f"{fullPath}\\{x.strip('\\')}"), reverse=True)
 
                 i = 0
                 currentSize = 0
                 for file in files:
-                    if not file.endswith(".dem"):
-                        continue
-
+                    
                     if file.startswith("!"): # ignore files marked as "important" by the user
                         continue
 
                     filePath = f"{fullPath}\\{file.strip('\\')}"
+
+                    if file.endswith(".json"):
+                        with open(filePath, "rt", encoding="utf-8") as f:
+                            if not f.readable():
+                                continue
+                            data: dict[str, list[str]] = json.load(f)
+                        if not data.get("events") is None and len(data.get("events", [])) < 1 and os.path.getsize(filePath) < 50:
+                            toDeleteEventFiles.append(filePath)
+                        continue
+
+                    if not file.endswith(".dem"):
+                        continue
+
                     i += 1
 
                     if (i > maxFiles):
@@ -146,14 +158,26 @@ for drive in get_drive_letters():
                         print(f"File older than {timeWindow}, deleting {Fore.BLUE}{file}{Fore.RESET}. {int(secondsSinceLastModify):,} > {timeWindow:,}")
                         continue
 
-                for item in toDelete:
+                for item in toDeleteEventFiles:
                     if moveToTrashbin:
                         send_to_recycle_bin(item)
                     else:
                         os.remove(item)
+
+                for item in toDelete:
+                    correspondingEventFile = f"{item.rsplit('.',1)[0]}.json"
+                    if moveToTrashbin:
+                        if os.path.isfile(correspondingEventFile):
+                            send_to_recycle_bin(correspondingEventFile)
+                        send_to_recycle_bin(item)
+                    else:
+                        if os.path.isfile(correspondingEventFile):
+                            os.remove(correspondingEventFile)
+                        os.remove(item)
                 
                 print("")
-                print(f"Removed {len(toDelete)} files.")
+                print(f"Removed {len(toDelete)} demo files.")
+                print(f"Removed {len(toDeleteEventFiles)} empty event files.")
                 print("")
 
 if keepConsoleOpen:

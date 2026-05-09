@@ -1,0 +1,50 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate timestamp tag
+        id: timestamp
+        run: |
+          TAG_NAME=$(date +"%Y-%m-%d_%H-%M-%S")
+          echo "tag=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create Git tag
+        run: |
+          git tag ${{ steps.timestamp.outputs.tag }}
+          git push origin ${{ steps.timestamp.outputs.tag }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.timestamp.outputs.tag }}
+          name: ${{ steps.timestamp.outputs.tag }}
+
+          fail_on_unmatched_files: false
+
+          body: |
+            [${{ github.event.head_commit.message }}](${{ github.event.head_commit.url }})
+
+          files: |
+            demoinputs/compiled/*.exe
+            demosearch/compiled/*.exe
+            markgroup/compiled/*.exe
+            parsekills/compiled/*.exe
+            removedemos/compiled/*.exe
+            steambuttons/firefox-plugin/steambuttons.zip
+            steambuttons/tampermonkey-script/Steam Buttons.user.js
