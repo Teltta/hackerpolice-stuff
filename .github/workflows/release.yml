@@ -46,5 +46,6 @@ jobs:
             markgroup/compiled/*.exe
             parsekills/compiled/*.exe
             removedemos/compiled/*.exe
-            steambuttons/firefox-plugin/steambuttons.zip
+            steambuttons/firefox-plugin/*.zip
+            steambuttons/firefox-plugin-mv3/*.zip
             steambuttons/tampermonkey-script/Steam Buttons.user.js

@@ -125,7 +125,10 @@ for drive in get_drive_letters():
                             if not f.readable():
                                 continue
                             data: dict[str, list[str]] = json.load(f)
-                        if not data.get("events") is None and len(data.get("events", [])) < 1 and os.path.getsize(filePath) < 50:
+                        if ((not data.get("events") is None and len(data.get("events", [])) < 1 and os.path.getsize(filePath) < 50) # empty event file
+                            or
+                            not os.path.isfile(f"{fullPath}\\{file.strip('\\').rsplit('.', 1)[0]}.dem")): # associated demo is deleted
+
                             toDeleteEventFiles.append(filePath)
                         continue
 

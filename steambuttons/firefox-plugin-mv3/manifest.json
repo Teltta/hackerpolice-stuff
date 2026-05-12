@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Steam Buttons MV3",
+  "version": "1.0",
+  "description": "Add SteamHistory and Shadefall buttons to user profiles.",
+
+  "permissions": [
+    "clipboardWrite"
+  ],
+
+  "host_permissions": [
+    "https://shadefall.net/*",
+    "https://steamhistory.net/*",
+    "https://raw.githubusercontent.com/*"
+  ],
+
+  "background": {
+    "scripts": ["background.js"],
+	"service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://*.steamcommunity.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["*://*.steamcommunity.com/*"]
+    }
+  ],
+
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "SteamButtonsMV3@Teltta"
+    }
+  }
+}
