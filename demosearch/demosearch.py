@@ -8,6 +8,9 @@ dumpFilePath = "\\demosearchDump.json"
 forceUpdate = False
 dumperName = "demo-dumper.exe"
 
+demoDumpFilename = "demo_dump.json"
+demoDumpAllFilename = "demo_dump_all.json"
+
 defaultCfg = {
     "_explanations": [
         "Inputs:",
@@ -25,6 +28,9 @@ defaultCfg = {
         "Key codes can be found here; https://asawicki.info/nosense/doc/devices/keyboard/key_codes.html. Default is Alt+P.",
         "",
         "dumpToFile bool=true: Wether to dump results to a file.",
+        "",
+        f"dumpAll bool=false: Dumps players from currently available demos to {demoDumpAllFilename} which from players wont be deleted even if the demo becomes unavailable.",
+        f"useAllDump bool=false: Wether to use {demoDumpAllFilename} instead of {demoDumpFilename}. {demoDumpFilename} only has players from currently available demos.",
         "",
         "dumpPartied bool=true: Dump people who are potentially in a party with the searched user. Party dumping is only available for users searched via ID64/32.",
         "partyRatio int=30: If someone is together with someone more than x% of games, theyll be counted as 'being in a group'.",
@@ -44,6 +50,8 @@ defaultCfg = {
         18, 80
     ],
     "dumpToFile": True,
+    "dumpAll": False,
+    "useAllDump": False,
     "dumpPartied": True,
     "partyRatio": 20,
     "partyRatioMinCount": 3,
@@ -99,8 +107,13 @@ def get_drive_letters():
         if os.path.exists(f"{d}:\\")
     ]
 
+def clear_keyboard_buffer():
+    while msvcrt.kbhit():
+        msvcrt.getwch()
 
 def wait_for_input(valid_keys: Iterable):
+    clear_keyboard_buffer()
+    
     while True:
         c = ord(Pause())
         if c in valid_keys: # 27 esc, 32 space
@@ -191,6 +204,10 @@ def find_name_in_demos(targets_:list[str]):
     pauseButton: list[int] = config.get("pauseButton", defaultCfg["pauseButton"])
 
     dumpToFile: bool = config.get("dumpToFile", defaultCfg["dumpToFile"])
+
+    dumpAll: bool = config.get("dumpAll", defaultCfg["dumpAll"])
+    useAllDump: bool = config.get("useAllDump", defaultCfg["useAllDump"])
+
     dumpPartied: bool = config.get("dumpPartied", defaultCfg["dumpPartied"])
     yourSteamID: str = config.get("yourSteamID", defaultCfg["yourSteamID"]).lower()
     partyRatio: int = config.get("partyRatio", defaultCfg["partyRatio"])
@@ -210,12 +227,14 @@ def find_name_in_demos(targets_:list[str]):
                         continue
                     print("")
                     print(f"Path: {fullPath}")
-                    dumpFile = os.path.join(fullPath, "demo_dump.json")
+                    dumpFile = os.path.join(fullPath, demoDumpFilename)
+                    dumpAllFile = os.path.join(fullPath, demoDumpAllFilename)
 
                     dirFiles = sorted([os.path.getmtime(os.path.join(fullPath, t)) for t in os.listdir(fullPath) if t.endswith(".dem")], reverse=True)
                     demAmount = len(dirFiles)
                     matchAmount = 0
                     newestFile = int(dirFiles[0])
+                    dumpAllData = None # init as None so we can check it later
 
                     _lastModifyCurrentDir: dict[str, int] = config.get("_lastModify", {}).get(fullPath, 0)
 
@@ -232,9 +251,49 @@ def find_name_in_demos(targets_:list[str]):
                         needsUpdate = True
                         print("Parsing demos... Done")
 
-                    with open(dumpFile, encoding="utf-8") as dump:
-                        dumpData: dict[str, dict[str, str]] = json.loads(dump.read())
-                        dump.close()
+                    with open(dumpFile, encoding="utf-8") as file_:
+                        dumpData: dict[str, dict[str, str]] = json.loads(file_.read())
+                        file_.close()
+
+                    if dumpAll:
+                        print("")
+                        print(f"Dumping players to {demoDumpAllFilename}...", end="\r")
+                        if not os.path.isfile(dumpAllFile):
+                            with open(dumpAllFile, "wt", encoding="utf-8") as file_:
+                                file_.write(json.dumps({}, indent=2, ensure_ascii=False))
+                        
+                        with open(dumpAllFile, "rt", encoding="utf-8") as file_:
+                            dumpAllData: dict[str, dict[str, str]] = json.loads(file_.read())
+
+                        for key, value in dumpData.items():
+                            for k, v in value.items():
+                                dumpAllData.setdefault(key, {})
+                                dumpAllData[key].setdefault(k, v)
+
+                        with open(dumpAllFile, "wt", encoding="utf-8") as file_:
+                            file_.write(json.dumps(dumpAllData, indent=2, ensure_ascii=False))
+
+                        print(f"Dumping players to {demoDumpAllFilename}... Done")
+
+                    if useAllDump:
+                        if dumpAllData is None:
+                            if not os.path.isfile(dumpAllFile):
+                                print("")
+                                print(f"{Fore.YELLOW}{demoDumpAllFilename} doesn't exist, using {demoDumpFilename}.")
+                            else:
+                                print("")
+                                print(f"{Fore.YELLOW}useAllDump is set to true, and dumpAll is set to false. Results may be outdated or empty.")
+                                with open(dumpAllFile, "rt", encoding="utf-8") as file_:
+                                    dumpData: dict[str, dict[str, str]] = json.loads(file_.read())
+                                print("")
+                                print(f"{Fore.MAGENTA}useAllDump set to true, using {demoDumpAllFilename}")
+
+
+                        else:
+                            dumpData: dict[str, dict[str, str]] = dumpAllData
+                            print("")
+                            print(f"{Fore.MAGENTA}useAllDump set to true, using {demoDumpAllFilename}")
+
 
                     amount = 0
 
